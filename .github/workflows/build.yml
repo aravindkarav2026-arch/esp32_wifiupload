@@ -1,7 +1,7 @@
-name: Build ESP32-C6 Firmware
+name: Manual Build ESP32-C6 Firmware
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -25,14 +25,20 @@ jobs:
         run: |
           pio run -e esp32-c6-devkitc-1
 
-      - name: Rename Firmware for Easy Identification
+      - name: Package All Flash Binaries
         run: |
           mkdir -p output
-          cp .pio/build/esp32-c6-devkitc-1/firmware.bin output/esp32c6-firmware.bin
+          BUILD_DIR=".pio/build/esp32-c6-devkitc-1"
+          
+          # Copy all 4 required flash files
+          cp $BUILD_DIR/bootloader.bin output/bootloader.bin
+          cp $BUILD_DIR/partitions.bin output/partitions.bin
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin output/boot_app0.bin
+          cp $BUILD_DIR/firmware.bin output/firmware.bin
 
-      - name: Upload Firmware Artifact
+      - name: Upload Complete Firmware Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c6-firmware
-          path: output/esp32c6-firmware.bin
+          name: esp32c6-factory-flash-bundle
+          path: output/
           retention-days: 30
