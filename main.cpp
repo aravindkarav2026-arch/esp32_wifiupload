@@ -1,122 +1,164 @@
+#define BLYNK_TEMPLATE_ID    "TMPL3pekN51Kj"
+#define BLYNK_TEMPLATE_NAME  "Watertanklevel"
+#define BLYNK_AUTH_TOKEN     "mGUWTvi_KRqoiftj8BK8YnMPn2A_9QoE"
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
 #include <Update.h>
+#include <BlynkSimpleEsp32.h>
+#include <algorithm> // For median filtering
 
 // --- Wi-Fi Credentials ---
-const char* ssid     = "AKB -4G";
-const char* password = "ar20232023";
+char ssid[] = "YOUR_WIFI_SSID";
+char pass[] = "YOUR_WIFI_PASSWORD";
 
-// Target Firmware Version & URL for Auto-Pull updates
-const char* CURRENT_VERSION = "1.0.0";
-const char* FIRMWARE_URL    = "http://YOUR_SERVER_OR_GITHUB_RELEASE_URL/firmware.bin";
+// --- Pin Assignments (ESP32-C6) ---
+#define TRIG_PIN     19
+#define ECHO_PIN     18
+#define RGB_LED_PIN  8   // Onboard WS2812 RGB LED
+
+// --- Tank Dimensions (in cm) ---
+const int TANK_FULL_DISTANCE  = 20;   // 100% full (sensor to water level)
+const int TANK_EMPTY_DISTANCE = 150;  // 0% full (sensor to tank bottom)
 
 WebServer server(80);
+BlynkTimer timer;
 
-// Simple HTML page for manual web uploads
+// Drag-and-Drop Web Upload Page HTML
 const char* uploadPage = 
   "<form method='POST' action='/update' enctype='multipart/form-data'>"
-    "<h2>ESP32-C6 N16 OTA Firmware Updater</h2>"
-    "<p>Select compiled firmware.bin file:</p>"
+    "<h2>ESP32-C6 Water Tank & OTA Firmware Updater</h2>"
+    "<p>Select new compiled firmware.bin file:</p>"
     "<input type='file' name='update' accept='.bin'>"
-    "<input type='submit' value='Flash Firmware Wireless'>"
+    "<input type='submit' value='Upload & Flash Wirelessly'>"
   "</form>";
 
-// Function to trigger direct HTTP download & flash from URL
-void checkForHttpUpdate(const char* binUrl) {
-  Serial.println("Starting HTTP OTA Update from URL...");
-  HTTPClient http;
-  
-  // Follow redirects (needed for GitHub release downloads)
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.begin(binUrl);
+// Onboard RGB LED Control
+void setBoardRGB(uint8_t r, uint8_t g, uint8_t b) {
+  #ifdef RGB_BUILTIN
+    neopixelWrite(RGB_BUILTIN, r, g, b);
+  #else
+    neopixelWrite(RGB_LED_PIN, r, g, b);
+  #endif
+}
 
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK) {
-    int contentLength = http.getSize();
-    bool canBegin = Update.begin(contentLength);
+// Single Ultrasonic Distance Pulse
+int readSingleDistanceCm() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
 
-    if (canBegin) {
-      Serial.println("Downloading and Flashing...");
-      WiFiClient* client = http.getStreamPtr();
-      size_t written = Update.writeStream(*client);
+  long duration = pulseIn(ECHO_PIN, HIGH, 15000); // 15ms timeout (~2.5m range)
+  if (duration == 0) return -1;
 
-      if (written == contentLength) {
-        Serial.println("Written successfully!");
-      } else {
-        Serial.printf("Written only %d/%d bytes\n", written, contentLength);
-      }
+  return duration * 0.034 / 2;
+}
 
-      if (Update.end()) {
-        if (Update.isFinished()) {
-          Serial.println("OTA Update Complete! Rebooting...");
-          ESP.restart();
-        }
-      } else {
-        Serial.printf("Error Occurred: %d\n", Update.getError());
-      }
-    } else {
-      Serial.println("Not enough space to start OTA update.");
+// Median Filtered Water Level Calculation
+int getFilteredWaterLevelPercentage() {
+  const int SAMPLES = 5;
+  int rawReadings[SAMPLES];
+  int validCount = 0;
+
+  for (int i = 0; i < SAMPLES; i++) {
+    int dist = readSingleDistanceCm();
+    if (dist > 0) {
+      rawReadings[validCount] = dist;
+      validCount++;
     }
-  } else {
-    Serial.printf("HTTP GET failed, error code: %d\n", httpCode);
+    delay(10); // Gap between acoustic pulses to prevent internal tank echoes
   }
-  http.end();
+
+  if (validCount == 0) return -1;
+
+  // Sort array to get median
+  std::sort(rawReadings, rawReadings + validCount);
+  int medianDistance = rawReadings[validCount / 2];
+
+  // Constrain distance to defined tank limits FIRST
+  medianDistance = constrain(medianDistance, TANK_FULL_DISTANCE, TANK_EMPTY_DISTANCE);
+
+  // Map distance to percentage (150cm = 0%, 20cm = 100%)
+  return map(medianDistance, TANK_EMPTY_DISTANCE, TANK_FULL_DISTANCE, 0, 100);
+}
+
+// Timer Task: Runs every 1 second
+void checkAndSendTankLevel() {
+  int percent = getFilteredWaterLevelPercentage();
+
+  if (percent == -1) {
+    Serial.println("Sensor Timeout / Reflection Error!");
+    return;
+  }
+
+  Serial.printf("Water Level: %d%%\n", percent);
+  
+  if (Blynk.connected()) {
+    Blynk.virtualWrite(V0, percent);
+  }
+
+  // Update Onboard RGB LED based on water level status
+  if (percent <= 30) {
+    setBoardRGB(255, 0, 0);   // RED (0% - 30%: Low Level)
+  } else if (percent <= 70) {
+    setBoardRGB(255, 255, 0); // YELLOW (31% - 70%: Medium Level)
+  } else {
+    setBoardRGB(0, 255, 0);   // GREEN (71% - 100%: Full Level)
+  }
 }
 
 void setup() {
   Serial.begin(115200);
 
-  // USB-CDC startup delay
+  // Native USB-CDC (COM7) setup delay
   unsigned long start = millis();
   while (!Serial && (millis() - start < 3000));
 
-  Serial.printf("\n--- ESP32-C6 N16 (Flash: 16MB) - Firmware v%s ---\n", CURRENT_VERSION);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 
+  // Non-blocking Wi-Fi and Blynk connection
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid, pass);
+  Blynk.config(BLYNK_AUTH_TOKEN);
+  Blynk.connect(5000);
 
+  Serial.println("\nWiFi Connecting...");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
   Serial.println("\nWiFi Connected!");
-  Serial.print("Local IP Address: http://");
+  Serial.print("Web OTA URL: http://");
   Serial.println(WiFi.localIP());
 
-// Route 1: Serve Web Interface
+  // Web OTA Server Routes (Compatible with ESP32 Core v3.x)
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/html", uploadPage);
   });
 
-  // Route 2: Trigger Manual HTTP Download Check
-  server.on("/check-update", HTTP_GET, []() {
-    server.send(200, "text/plain", "Checking for updates...");
-    checkForHttpUpdate(FIRMWARE_URL);
-  });
-
-  // Route 3: Handle Drag-and-Drop Web Upload (Updated for ESP32 Arduino Core v3.x)
   server.on("/update", HTTP_POST, []() {
     server.send(200, "text/plain", (Update.hasError()) ? "OTA FAIL" : "OTA SUCCESS - Rebooting...");
     ESP.restart();
   }, []() {
-    HTTPUpload& upload = server.upload(); // Fixed: server.upload() instead of server.arg(0)
+    HTTPUpload& upload = server.upload();
     
     if (upload.status == UPLOAD_FILE_START) {
-      Serial.printf("Update start: %s\n", upload.filename.c_str());
+      Serial.printf("OTA Start: %s\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-      // Fixed: upload.currentSize instead of upload.currentLength
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) {
-        Serial.printf("Update Successful: %u bytes\nRebooting...\n", upload.totalSize);
+        Serial.printf("OTA Success: %u bytes\nRebooting...\n", upload.totalSize);
       } else {
         Update.printError(Serial);
       }
@@ -124,9 +166,15 @@ void setup() {
   });
 
   server.begin();
+
+  // Run tank level check every 1000ms (1 second)
+  timer.setInterval(1000L, checkAndSendTankLevel);
 }
 
 void loop() {
   server.handleClient();
-  delay(2);
+  if (Blynk.connected()) {
+    Blynk.run();
+  }
+  timer.run();
 }
