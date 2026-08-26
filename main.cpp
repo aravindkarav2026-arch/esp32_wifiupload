@@ -61,12 +61,13 @@ void logPrintf(const char* format, ...) {
   SerialCOM8.print(loc_buf);
 }
 
-// Onboard RGB LED Control
+
+// Onboard RGB LED Control (WS2812 color sequence fix: G, R, B)
 void setBoardRGB(uint8_t r, uint8_t g, uint8_t b) {
   #ifdef RGB_BUILTIN
-    neopixelWrite(RGB_BUILTIN, r, g, b);
+    neopixelWrite(RGB_BUILTIN, g, r, b); // Swapped r and g
   #else
-    neopixelWrite(RGB_LED_PIN, r, g, b);
+    neopixelWrite(RGB_LED_PIN, g, r, b);  // Swapped r and g
   #endif
 }
 
