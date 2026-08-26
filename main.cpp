@@ -7,6 +7,7 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <BlynkSimpleEsp32.h>
+#include <ESPmDNS.h>
 #include <algorithm> // For median filtering
 
 // --- Wi-Fi Credentials ---
@@ -21,6 +22,9 @@ char pass[] = "ar20232023";
 // --- Tank Dimensions (in cm) ---
 const int TANK_FULL_DISTANCE  = 25;   // 100% full (sensor to water level)
 const int TANK_EMPTY_DISTANCE = 130;  // 0% full (sensor to tank bottom)
+
+// --- Configuration ---
+const char* mdns_hostname = "watertank"; // Becomes http://watertank.local
 
 // Initialize secondary hardware serial on UART1 (avoiding UART0 collision with Serial)
 HardwareSerial SerialCOM8(1); 
@@ -163,7 +167,6 @@ void setup() {
 
   logPrintln("WiFi Connecting...");
   
-  // Non-blocking Wi-Fi connect loop with 15-second timeout
   unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart < 15000)) {
     delay(500);
@@ -175,9 +178,19 @@ void setup() {
     logPrint("Local IP Address: http://");
     logPrintln(WiFi.localIP());
 
+    // 2. Start mDNS Responder
+    if (MDNS.begin(mdns_hostname)) {
+      logPrintf("mDNS Responder Started! Access at: http://%s.local\n", mdns_hostname);
+      
+      // 3. Register HTTP Service on Port 80
+      MDNS.addService("http", "tcp", 80);
+    } else {
+      logPrintln("Error setting up mDNS responder!");
+    }
+
     // 4. Configure and connect to Blynk
     Blynk.config(BLYNK_AUTH_TOKEN);
-    Blynk.connect(); 
+    Blynk.connect(3000); 
   } else {
     logPrintln("\nWiFi Connection Failed! Proceeding in offline mode...");
   }
