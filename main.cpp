@@ -20,7 +20,7 @@ char pass[] = "ar20232023";
 
 // --- Tank Dimensions (in cm) ---
 const int TANK_FULL_DISTANCE  = 25;   // 100% full (sensor to water level)
-const int TANK_EMPTY_DISTANCE = 150;  // 0% full (sensor to tank bottom)
+const int TANK_EMPTY_DISTANCE = 130;  // 0% full (sensor to tank bottom)
 
 // Initialize secondary hardware serial on UART1 (avoiding UART0 collision with Serial)
 HardwareSerial SerialCOM8(1); 
