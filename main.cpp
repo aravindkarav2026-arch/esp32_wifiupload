@@ -10,8 +10,8 @@
 #include <algorithm> // For median filtering
 
 // --- Wi-Fi Credentials ---
-char ssid[] = "YOUR_WIFI_SSID";
-char pass[] = "YOUR_WIFI_PASSWORD";
+char ssid[] = "AKB -4G";
+char pass[] = "ar20232023";
 
 // --- Pin Assignments (ESP32-C6) ---
 #define TRIG_PIN     19
