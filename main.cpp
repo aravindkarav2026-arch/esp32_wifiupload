@@ -86,30 +86,32 @@ void setup() {
   Serial.print("Local IP Address: http://");
   Serial.println(WiFi.localIP());
 
-  // Route 1: Web Interface
+// Route 1: Serve Web Interface
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/html", uploadPage);
   });
 
-  // Route 2: Trigger Manual Update Check via URL query: http://<IP>/check-update
+  // Route 2: Trigger Manual HTTP Download Check
   server.on("/check-update", HTTP_GET, []() {
     server.send(200, "text/plain", "Checking for updates...");
     checkForHttpUpdate(FIRMWARE_URL);
   });
 
-  // Handle Drag-and-Drop Web Upload
+  // Route 3: Handle Drag-and-Drop Web Upload (Updated for ESP32 Arduino Core v3.x)
   server.on("/update", HTTP_POST, []() {
     server.send(200, "text/plain", (Update.hasError()) ? "OTA FAIL" : "OTA SUCCESS - Rebooting...");
     ESP.restart();
   }, []() {
-    HTTPUpload& upload = server.arg(0);
+    HTTPUpload& upload = server.upload(); // Fixed: server.upload() instead of server.arg(0)
+    
     if (upload.status == UPLOAD_FILE_START) {
       Serial.printf("Update start: %s\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (Update.write(upload.buf, upload.currentLength) != upload.currentLength) {
+      // Fixed: upload.currentSize instead of upload.currentLength
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_END) {
