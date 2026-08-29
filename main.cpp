@@ -101,7 +101,7 @@ void updateDailyStats() {
   }
 }
 
-// Generate Dynamic HTML Webpage for watertank.local
+// Dynamic HTML Webpage for watertank.local
 void handleRootWebPage() {
   uint32_t totalSecs = dailyUptimeSeconds + ((millis() - currentSessionStartSec) / 1000);
   uint32_t hrs = totalSecs / 3600;
@@ -109,7 +109,7 @@ void handleRootWebPage() {
 
   String html = "<!DOCTYPE html><html><head>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<meta http-equiv='refresh' content='5'>"; // Auto-refresh web page every 5 seconds
+  html += "<meta http-equiv='refresh' content='5'>"; 
   html += "<title>ESP32-C6 Tank Dashboard</title>";
   html += "<style>";
   html += "body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }";
@@ -136,7 +136,7 @@ void handleRootWebPage() {
   html += "<div class='stat'><b>Wi-Fi Status:</b> " + String((WiFi.status() == WL_CONNECTED) ? "Connected" : "Offline") + "</div>";
   html += "<div class='stat'><b>Local IP:</b> " + WiFi.localIP().toString() + "</div>";
   html += "<div class='stat'><b>Boots Today:</b> " + String(dailyBootCount) + "</div>";
-  html += "<div class='stat'><b>Uptime Today:</b> " + String(hrs) + "h " + String(mins) + "m</div>";
+  html += "<div class='stat'><b>Uptime Today:</b> " + String(hrs) + "h " + String(mins) + "m (" + String(totalSecs / 60) + " mins)</div>";
   html += "</div>";
 
   html += "<div class='card'>";
@@ -237,26 +237,33 @@ void checkAndSendTankLevel() {
   currentWaterPercent = getFilteredWaterLevelPercentage();
   const char* statusStr = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Offline";
 
+  // Compute current total daily uptime in minutes
+  uint32_t totalUptimeSecs = dailyUptimeSeconds + ((millis() - currentSessionStartSec) / 1000);
+  uint32_t dailyUptimeMinutes = totalUptimeSecs / 60;
+
   if (currentWaterPercent == -1) {
     logPrintln("Sensor Timeout / Reflection Error!");
     updateOLEDDisplay(-1, statusStr);
-    return;
-  }
-
-  logPrintf("Water Level: %d%%\n", currentWaterPercent);
-  
-  if (Blynk.connected()) {
-    Blynk.virtualWrite(V0, currentWaterPercent);
-  }
-
-  updateOLEDDisplay(currentWaterPercent, statusStr);
-
-  if (currentWaterPercent <= 30) {
-    setBoardRGB(255, 0, 0);
-  } else if (currentWaterPercent <= 70) {
-    setBoardRGB(255, 255, 0);
   } else {
-    setBoardRGB(0, 255, 0);
+    logPrintf("Water Level: %d%%\n", currentWaterPercent);
+    updateOLEDDisplay(currentWaterPercent, statusStr);
+
+    if (currentWaterPercent <= 30) {
+      setBoardRGB(255, 0, 0);
+    } else if (currentWaterPercent <= 70) {
+      setBoardRGB(255, 255, 0);
+    } else {
+      setBoardRGB(0, 255, 0);
+    }
+  }
+
+  // Send all metrics to Blynk Cloud if connected
+  if (Blynk.connected()) {
+    if (currentWaterPercent >= 0) {
+      Blynk.virtualWrite(V0, currentWaterPercent);  // Water Level (%)
+    }
+    Blynk.virtualWrite(V1, dailyBootCount);         // Boots Count Today
+    Blynk.virtualWrite(V2, dailyUptimeMinutes);     // Uptime Today (Minutes)
   }
 }
 
