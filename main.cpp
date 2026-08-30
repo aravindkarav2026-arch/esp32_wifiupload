@@ -78,8 +78,6 @@ void setBoardRGB(uint8_t r, uint8_t g, uint8_t b) {
 // LED Behavior Controller (Solid based on level, or Double-Blink when >= 95%)
 void handleLedState() {
   if (currentWaterPercent < 0) {
-    // Sensor Error or Booting: Solid Red
-    setBoardRGB(255, 0, 0);
     return;
   }
 
