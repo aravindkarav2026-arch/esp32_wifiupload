@@ -27,7 +27,7 @@ const int daylightOffset_sec = 0;
 // --- Pin Assignments (ESP32-C6) ---
 #define TRIG_PIN     19
 #define ECHO_PIN     18
-#define RGB_LED_PIN  8    // Double-blinks twice per second
+#define RGB_LED_PIN  8    
 #define OLED_SDA     6    
 #define OLED_SCL     7    
 #define RELAY_PIN    22   // Relay module pin for 5V Buzzer Alarm
@@ -66,25 +66,40 @@ void logPrintf(const char* format, ...) {
   SerialCOM8.print(loc_buf);
 }
 
-// Non-blocking LED Double-Blink Logic (2 flashes within 1000ms cycle)
-void handleLedBlink() {
-  static unsigned long lastCycleStart = 0;
-  unsigned long currentMillis = millis();
-  unsigned long elapsed = (currentMillis - lastCycleStart) % 1000; // Repeat every 1 second
+// Low-level helper to write color to Neopixel/RGB LED
+void setBoardRGB(uint8_t r, uint8_t g, uint8_t b) {
+  #ifdef RGB_BUILTIN
+    neopixelWrite(RGB_BUILTIN, g, r, b);
+  #else
+    neopixelWrite(RGB_LED_PIN, g, r, b);
+  #endif
+}
 
-  // 1000ms pattern: Flash 1 (0-100ms) -> OFF (100-200ms) -> Flash 2 (200-300ms) -> OFF (300-1000ms)
-  if ((elapsed >= 0 && elapsed < 100) || (elapsed >= 200 && elapsed < 300)) {
-    #ifdef RGB_BUILTIN
-      neopixelWrite(RGB_BUILTIN, 0, 0, 255); // Blue flash for Neopixel
-    #else
-      digitalWrite(RGB_LED_PIN, HIGH);
-    #endif
+// LED Behavior Controller (Solid based on level, or Double-Blink when >= 95%)
+void handleLedState() {
+  if (currentWaterPercent < 0) {
+    // Sensor Error or Booting: Solid Red
+    setBoardRGB(255, 0, 0);
+    return;
+  }
+
+  if (currentWaterPercent >= 95) {
+    // High Alarm (>=95%): Non-blocking double blink (Blue)
+    unsigned long elapsed = millis() % 1000;
+    if ((elapsed >= 0 && elapsed < 100) || (elapsed >= 200 && elapsed < 300)) {
+      setBoardRGB(0, 0, 255); // Flash ON
+    } else {
+      setBoardRGB(0, 0, 0);   // Flash OFF
+    }
+  } else if (currentWaterPercent > 70) {
+    // Normal High (71% - 94%): Solid Green
+    setBoardRGB(0, 255, 0);
+  } else if (currentWaterPercent > 30) {
+    // Medium (31% - 70%): Solid Yellow
+    setBoardRGB(255, 255, 0);
   } else {
-    #ifdef RGB_BUILTIN
-      neopixelWrite(RGB_BUILTIN, 0, 0, 0);
-    #else
-      digitalWrite(RGB_LED_PIN, LOW);
-    #endif
+    // Low (0% - 30%): Solid Red
+    setBoardRGB(255, 0, 0);
   }
 }
 
@@ -335,7 +350,7 @@ void setup() {
 
   unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart < 15000)) {
-    handleLedBlink(); // Keep double-blinking during Wi-Fi connect
+    setBoardRGB(255, 0, 0); // Booting indicator: Solid Red
     delay(10);
   }
 
@@ -372,7 +387,7 @@ void setup() {
 }
 
 void loop() {
-  handleLedBlink(); // Continuously processes non-blocking 2-flash/sec pattern
+  handleLedState(); // Drives solid colors or double-blinks based on current level
   server.handleClient();
   if (WiFi.status() == WL_CONNECTED) {
     Blynk.run();
